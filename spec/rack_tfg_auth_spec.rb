@@ -110,6 +110,38 @@ describe Rack::TfgAuth do
       result = app.call(env)
       result.status.should eq 401
     end
+
+    def signature(string_to_sign)
+      digest = OpenSSL::Digest::Digest.new('sha256')
+      Base64.encode64(OpenSSL::HMAC.digest(digest, "my-shared-secret", string_to_sign)).chomp
+    end
+
+    [:get, :post, :put].each do |method|
+      it "accepts request using a valid signature via #{method.upcase}" do
+        now = Time.utc(2013,6,14,12).to_i
+        app = build_app(:now => now, :client_secrets => {"fake_client" => "my-shared-secret"})
+        body = method == :get ? '' : 'mybodydata'
+        string_to_sign = [
+            method.upcase,
+            'fake_client',
+            now.to_s,
+            'http://example.org/signature/test.json',
+            body
+        ].compact.join("\n")
+        env = {
+          "REQUEST_METHOD" => method.to_s.upcase,
+          "rack.url_scheme" => "http",
+          "HTTP_HOST" => "example.org",
+          "SERVER_PORT" => "80",
+          "PATH_INFO" => "/signature/test.json",
+          "rack.input" => StringIO.new(body),
+          'HTTP_AUTHORIZATION' => %(TFG client="fake_client", signature="#{signature(string_to_sign)}", timestamp="#{now}")
+        }
+        Endpoint.should_receive(:call).with(env)
+        result = app.call(env)
+      end
+    end
+
   end
 
   context "when the block returns true" do
